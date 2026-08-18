@@ -133,3 +133,50 @@ mkdir data\raw data\external data\processed src notebooks outputs\figures output
 # README.md       - paste README content
 # requirements.txt - paste requirements content
 # SETUP.md        - this file
+
+#####################################################
+# STEP 9: First commit and push to GitHub
+#####################################################
+
+# Stage all files (tells git to include everything in next snapshot)
+git add .
+
+# Take the snapshot with a descriptive message
+git commit -m "Initial repo structure - folders and starter files"
+
+# Push to GitHub (-u sets origin master as default, only needed first time)
+git push -u origin master
+
+# Browser will open for GitHub authentication on first push - complete it
+# After this, future pushes just need: git push
+
+# Verify at: github.com/Julian-Plough/survival-katrina
+# The three core commands, what they actually do:
+git add .        # load the tray (stage) - everything MINUS what is in .gitignore
+git commit -m "message"      # take the photo (snapshot, LOCAL only)
+git push         # send the photo to GitHub (REMOTE update)
+
+# Always save in VSCode before git add .
+# Git cannot see unsaved changes.
+
+
+#####################################################
+# STEP 10: Python Environment Setup
+#####################################################
+
+# We use the myenv conda environment stored in C:\Users\ploug\miniconda3\envs\myenv
+# To activate it from any directory:
+C:\Users\ploug\miniconda3\Scripts\activate && conda activate myenv
+
+# Verify you are in the right place:
+# Prompt should show: (myenv) D:\Survival Analysis 2026\survival-katrina>
+
+# Key packages (verify with: conda list | findstr "pandas pyreadstat lifelines")
+# pandas        - data manipulation
+# pyreadstat    - reads Stata .dta files into pandas
+# lifelines     - survival analysis (KM, Cox, Weibull AFT)
+# geopandas     - spatial operations (for future spatial join translation)
+
+# Install if missing:
+conda install pyreadstat -y
+pip install lifelines
