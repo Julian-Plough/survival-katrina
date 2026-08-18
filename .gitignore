@@ -1,0 +1,23 @@
+# Data files - too large and potentially sensitive
+data/raw/
+data/processed/
+data/external/
+
+# Outputs - reproducible from code
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
