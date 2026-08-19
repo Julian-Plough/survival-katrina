@@ -7,34 +7,39 @@
 #  on drive if needed)
 #
 # WHAT THIS DOES:
-# Replicates the data merging steps from the Stata pipeline:
-# 1. Loads the core parcel-tenure dataset (causal_dataset.dta)
-#    which was built by the Stata do files from raw OPLR sales data
-#    and HMDA matched loan records
-# 2. Merges in FEMA flood zone and census tract IDs (tract_spatial.dta)
-# 3. Merges in tract-level demographics from 1990, 2000, 2010 census
-# 4. Merges in homeowner-specific race data from 2000 and 2010 census
-# 5. Merges in CPI inflation adjustment factors
+# 1. Loads core parcel-tenure dataset (causal_dataset.dta)
+# 2. Merges tract spatial data (FEMA zones, tract IDs) on geopin
+#    - drops overlapping columns from causal before merging
+# 3. Forces tract IDs to Int64
+# 4. Merges census tract demographics (1990, 2000, 2010)
+# 5. Merges homeowner race data (2000, 2010)
+# 6. Inflation adjusts sale_price using move_in date, rounded to nearest $100
+# 7. Saves assembled dataset to data/processed/assembled.parquet
 #
-# OUTPUT: data/processed/assembled.parquet
-#         (parquet is faster and smaller than csv for large dataframes)
+# KNOWN ISSUES / TODO:
+# - sale_price vs purchase_price distinction not fully understood
+#   not all HOTs have a sale_price -- possible explanations: inherited
+#   properties, tax sales, data gaps in OPLR scrape, or current tenures
+#   needs investigation when upstream pipeline is redone
+# - inflation adjustment uses move_in date as the price date
+#   should be verified against original Stata code
+# - inflation file adjusts to 2021 dollars (BLS CPI-U)
+#   update to 2026 dollars before final submission
+# - entire upstream pipeline needs to be redone from raw data products:
+#   * spatial join should be redone at block group level (not tract)
+#   * FEMA flood plain map vintage needs to be identified and documented
+#     (has implications for pre/post remapping exposure classification)
+#   * HMDA matching, census formatting, HOT construction all need
+#     clean Python translations
+#   * web scraper (session_scrape.py) does NOT need to be rerun
+#     raw scraped data products are preserved
 #
-# NOTE: causal_dataset.dta itself was built upstream by:
+# NOTE: causal_dataset.dta was built upstream by:
 #       - data_setup_2_22.do (OPLR sales -> HOT construction)
 #       - Untitled_3.do (HMDA LAR append and match quality filter)
 #       - session_scrape.py (Orleans Parish web scraper)
 #       - LAR_Reader.py / 2007_2014_LAR.py (HMDA LAR parsing)
 #       That upstream pipeline is documented in docs/data_sources.md
-#
-# TODO: the upstream Stata pipeline (data_setup_2_22.do etc.) should
-#       eventually be fully translated to Python for complete
-#       reproducibility. Low priority for current submission.
-#       Target files to translate:
-#       - data_setup_2_22.do
-#       - Causal_Data_Setup.do
-#       - Untitled_3.do
-#       - census_format.do
-#       - hmdamatch (currently documented via Bayer et al. method)
 
 import pandas as pd
 import pyreadstat
@@ -45,76 +50,57 @@ from config import *
 
 def load_dta(path):
     """Load a Stata .dta file into a pandas DataFrame."""
-    df, meta = pyreadstat.read_dta(str(path))
+    df, _ = pyreadstat.read_dta(str(path))
     return df
 
 def main():
-    print("=" * 50)
-    print("MODULE 1: DATA ASSEMBLY")
-    print("=" * 50)
 
     # ── Step 1: Core dataset ──────────────────────────────
-    print("\n[1/5] Loading causal_dataset...")
-    df = load_dta(CAUSAL_DATASET)
-    print(f"      {len(df):,} records, {df.shape[1]} columns")
-    print(f"      Columns: {list(df.columns)}")
+    causal = load_dta(CAUSAL_DATASET)
 
-    # ── Step 2: FEMA zones and census tract IDs ───────────
-    print("\n[2/5] Merging tract spatial data (FEMA zones, tract IDs)...")
+    # ── Step 2: Spatial merge on geopin ───────────────────
     spatial = load_dta(TRACT_SPATIAL)
-    n_before = len(df)
-    df = df.merge(spatial, on="geopin", how="inner")
-    print(f"      {n_before:,} -> {len(df):,} records after inner merge")
-    # resolve column name collisions from spatial merge
-    # causal_dataset already has tract IDs and hand/acres
-    # tract_spatial brings fld_zone and zone_subty (the new things we need)
-    # drop the _y duplicates, rename _x back to originals
-    df = df.drop(columns=['acres_y', 'hand_y', 'tract_2000_y', 
-                           'tract_2010_y', 'tract_1990_y'])
-    df = df.rename(columns={
-        'acres_x': 'acres',
-        'hand_x': 'hand',
-        'tract_1990_x': 'tract_1990',
-        'tract_2000_x': 'tract_2000',
-        'tract_2010_x': 'tract_2010'
-    })
-    print(f"      Columns after spatial merge: {list(df.columns)}")
+    cols_to_drop = [c for c in causal.columns if c in spatial.columns and c != 'geopin']
+    causal = causal.drop(columns=cols_to_drop)
+    df = causal.merge(spatial, on='geopin', how='inner')
 
-    # ── Step 3: Census tract demographics ─────────────────
-    print("\n[3/5] Merging census tract demographics...")
-    c1990 = load_dta(CENSUS_1990)
-    c2000 = load_dta(CENSUS_2000)
-    c2010 = load_dta(CENSUS_2010)
-    df = df.merge(c1990, on="tract_1990", how="left")
-    df = df.merge(c2000, on="tract_2000", how="left")
-    df = df.merge(c2010, on="tract_2010", how="left")
-    print(f"      {len(df):,} records after census merge")
+    # ── Step 3: Force tract IDs to Int64 ──────────────────
+    for col in ['tract_1990', 'tract_2000', 'tract_2010']:
+        df[col] = df[col].fillna(-1).astype(int).astype('Int64').replace(-1, pd.NA)
 
-    # ── Step 4: Homeowner race data ───────────────────────
-    print("\n[4/5] Merging homeowner census data...")
-    ho2000 = load_dta(CENSUS_HO_2000)
-    ho2010 = load_dta(CENSUS_HO_2010)
-    df = df.merge(ho2000, on="tract_2000", how="left")
-    df = df.merge(ho2010, on="tract_2010", how="left")
-    print(f"      {len(df):,} records after homeowner merge")
+    # ── Step 4: Census and homeowner merges ───────────────
+    census_files = [
+        (CENSUS_1990,    'tract_1990'),
+        (CENSUS_2000,    'tract_2000'),
+        (CENSUS_2010,    'tract_2010'),
+        (CENSUS_HO_2000, 'tract_2000'),
+        (CENSUS_HO_2010, 'tract_2010'),
+    ]
+    for path, key in census_files:
+        data = load_dta(path)
+        data[key] = data[key].fillna(-1).astype(int).astype('Int64').replace(-1, pd.NA)
+        df = df.merge(data, on=key, how='left')
 
-    print(df[['move_in', 'move_out', 'purchase_price', 'sale_price', 'l_date', 'applicant_income']].describe())
     # ── Step 5: Inflation adjustment ──────────────────────
-    print("\n[5/5] Inflation adjustment...")
-    # TODO: properly implement inflation adjustment in Module 2
-    # need to verify price columns and date formats first
-    # inflation_6_21.dta loaded but merge deferred
-    infl = load_dta(INFLATION)
-    print(f"      Inflation file loaded, merge deferred to Module 2")
+    # use move_in date (Stata format: days since 1960-01-01)
+    # rounded to nearest $100 to reflect precision in raw data
+    # TODO: verify move_in is correct date for price adjustment
+    # TODO: update inflation to 2026 dollars before final submission
+    df['move_in_date'] = pd.to_datetime(df['move_in'], unit='D', origin='1960-01-01')
+    df['l_year'] = df['move_in_date'].dt.year.astype('Int64')
+    df['l_month'] = df['move_in_date'].dt.month.astype('Int64')
 
-    # ── Save ──────────────────────────────────────────────
-    print("\nSaving assembled dataset...")
+    infl = load_dta(INFLATION)
+    infl['l_year'] = infl['l_year'].astype('Int64')
+    infl['l_month'] = infl['l_month'].astype('Int64')
+
+    df = df.merge(infl, on=['l_year', 'l_month'], how='left')
+    df['sale_price_adj'] = (df['sale_price'] * df['inflation_6_21']).round(-2).fillna(pd.NA).astype('Int64')
+
+    # ── Step 6: Save ──────────────────────────────────────
     out = Path(PROCESSED_DIR) / "assembled.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
-    print(f"      Saved to {out}")
-    print(f"      Final shape: {df.shape}")
-    print("\nModule 1 complete.")
 
 if __name__ == "__main__":
     main()
