@@ -20,5 +20,5 @@ parcel-level dataset constructed from public records.
 ## Methods
 Kaplan-Meier nonparametric survival curves and Weibull accelerated 
 failure time (AFT) models with parcel-level frailty terms. Key 
-specification includes a triple interaction of race × flood zone × 
+specification includes a triple interaction of social indicator × flood zone × 
 Katrina exposure.
