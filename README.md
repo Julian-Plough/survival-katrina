@@ -3,7 +3,7 @@
 ## Overview
 This repository contains the full analysis pipeline for a study of 
 homeownership tenure duration in Orleans Parish, Louisiana following 
-Hurricane Katrina (2005). The study examines how race, flood zone 
+Hurricane Katrina (2005). The study examines how income, race, flood zone 
 designation, and storm exposure interact to shape the time until 
 home sale, using survival analysis methods applied to a novel 
 parcel-level dataset constructed from public records.
@@ -22,5 +22,3 @@ Kaplan-Meier nonparametric survival curves and Weibull accelerated
 failure time (AFT) models with parcel-level frailty terms. Key 
 specification includes a triple interaction of race × flood zone × 
 Katrina exposure.
-
-## Pipeline
